@@ -312,6 +312,14 @@ function Conversation() {
       }
       const data = await response.json();
       setRecordStatus("idle");
+
+      // 调试：看当前评估模式
+      if (data.mode) {
+        console.log(
+          `[模式] ${data.mode}${data.whisperFailed ? " (Whisper 失败退化)" : ""} → text: "${data.text}"`,
+        );
+      }
+
       if (!data.text) {
         alert(`没识别到内容：${data.hint || "请说长一点"}`);
         return;

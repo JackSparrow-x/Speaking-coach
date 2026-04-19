@@ -146,6 +146,7 @@ git push              # Vercel 自动部署
 5. **Next.js 16 默认阻止 LAN IP 访问 dev 资源** — `next.config.ts` 加 `allowedDevOrigins`
 6. **Azure REST API 返回的发音数据字段是平铺的**（不是 SDK 那种 `PronunciationAssessment` 嵌套）
 7. **Unscripted 发音评估**：`ReferenceText` 字段必须**完全省略**，不能设空字符串
+8. **STT 架构（V2.6）**：串行 Whisper → Azure Scripted。Whisper 先出准确转录 → 作为 `ReferenceText` 传给 Azure 做 Scripted 发音评估。之前并行跑 Azure Unscripted + Whisper 会导致词语标签（Azure 识别词）和气泡文本（Whisper 识别词）不一致，评分也建立在 Azure 错听的词上。Whisper 失败时退化到 Unscripted 作为兜底。Scripted 模式下 `EnableMiscue: true`，Azure 会标记 Omission/Insertion/Substitution——可以用来检测 Whisper 幻觉。
 
 ## 用户基本信息
 

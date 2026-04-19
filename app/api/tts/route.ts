@@ -13,6 +13,10 @@ export async function POST(request: Request) {
       return Response.json({ error: "缺少 text 字段" }, { status: 400 });
     }
 
+    // 过滤 emoji（AI 回复里的 emoji 会被 TTS 念出来很怪）
+    // 文字气泡保留 emoji 不影响，只在合成语音前剥掉
+    const cleanText = stripEmoji(text);
+
     const region = process.env.AZURE_SPEECH_REGION;
     const key = process.env.AZURE_SPEECH_KEY;
 
@@ -32,7 +36,7 @@ export async function POST(request: Request) {
     const ssml = `
 <speak version='1.0' xml:lang='en-US'>
   <voice xml:lang='en-US' name='en-US-JennyNeural'>
-    ${escapeXml(text)}
+    ${escapeXml(cleanText)}
   </voice>
 </speak>`.trim();
 
@@ -72,6 +76,17 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+}
+
+// 去除 emoji 和其他象形字符，同时压缩多余空白
+function stripEmoji(text: string): string {
+  return text
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/[\u{1F3FB}-\u{1F3FF}\u{1F9B0}-\u{1F9B3}]/gu, "") // 肤色/发色
+    .replace(/\uFE0F/g, "") // variation selector
+    .replace(/\u200D/g, "") // zero-width joiner
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // SSML 是 XML 格式，文本里如果有 < > & " ' 会被当成语法，要转义

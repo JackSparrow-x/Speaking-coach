@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { webmToWav } from "@/lib/audio-utils";
 import {
   SCENARIOS,
@@ -485,13 +487,23 @@ function MessageBubble({ message }: { message: Message }) {
       className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}
     >
       <div
-        className={`max-w-[80%] flex flex-col gap-2 px-4 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+        className={`max-w-[80%] flex flex-col gap-2 px-4 py-2 rounded-2xl text-sm leading-relaxed ${
           isUser
             ? "bg-blue-500 text-white"
             : "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700"
         }`}
       >
-        <div>{message.content}</div>
+        {isUser ? (
+          // 用户消息：纯文本（就是自己说的话，不需要 markdown）
+          <div className="whitespace-pre-wrap">{message.content}</div>
+        ) : (
+          // AI 消息：用 markdown 渲染（加粗、引用、列表等）
+          <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_blockquote]:my-1 [&_strong]:font-semibold">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        )}
         {message.audioUrl && (
           <audio
             key={message.audioUrl}
@@ -817,10 +829,16 @@ function WordDetail({
       </div>
 
       {/* LLM 解读 */}
-      <div className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">
+      <div className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
         {loading && <span className="text-zinc-400">AI 分析中...</span>}
         {error && <span className="text-red-500">分析失败：{error}</span>}
-        {analysis && <div>{analysis}</div>}
+        {analysis && (
+          <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-1 [&_strong]:font-semibold [&_blockquote]:my-1 [&_blockquote]:border-l-2 [&_blockquote]:border-zinc-300 [&_blockquote]:pl-2 [&_blockquote]:text-zinc-600">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {analysis}
+            </ReactMarkdown>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -954,10 +972,16 @@ function ProsodyDetail({
       </div>
 
       {/* LLM 整句分析 */}
-      <div className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">
+      <div className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
         {loading && <span className="text-zinc-400">AI 分析整句语调中...</span>}
         {error && <span className="text-red-500">分析失败：{error}</span>}
-        {analysis && <div>{analysis}</div>}
+        {analysis && (
+          <div className="prose prose-sm dark:prose-invert max-w-none [&_p]:my-1 [&_strong]:font-semibold [&_blockquote]:my-1 [&_blockquote]:border-l-2 [&_blockquote]:border-zinc-300 [&_blockquote]:pl-2 [&_blockquote]:text-zinc-600">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {analysis}
+            </ReactMarkdown>
+          </div>
+        )}
       </div>
     </div>
   );

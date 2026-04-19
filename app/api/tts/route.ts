@@ -89,13 +89,23 @@ export async function POST(request: Request) {
   }
 }
 
-// 去除 emoji 和其他象形字符，同时压缩多余空白
+// 去除 emoji、markdown 标记和多余空白，给 TTS 用
 function stripEmoji(text: string): string {
   return text
+    // Markdown 标记
+    .replace(/\*\*(.+?)\*\*/g, "$1") // **bold** → bold
+    .replace(/\*(.+?)\*/g, "$1") // *italic* → italic
+    .replace(/__(.+?)__/g, "$1") // __bold__ → bold
+    .replace(/_(.+?)_/g, "$1") // _italic_ → italic
+    .replace(/^>\s*/gm, "") // > quote → quote
+    .replace(/^#+\s*/gm, "") // # heading → heading
+    .replace(/`([^`]+)`/g, "$1") // `code` → code
+    // Emoji 和象形字符
     .replace(/\p{Extended_Pictographic}/gu, "")
-    .replace(/[\u{1F3FB}-\u{1F3FF}\u{1F9B0}-\u{1F9B3}]/gu, "") // 肤色/发色
-    .replace(/\uFE0F/g, "") // variation selector
-    .replace(/\u200D/g, "") // zero-width joiner
+    .replace(/[\u{1F3FB}-\u{1F3FF}\u{1F9B0}-\u{1F9B3}]/gu, "")
+    .replace(/\uFE0F/g, "")
+    .replace(/\u200D/g, "")
+    // 压缩空白
     .replace(/\s+/g, " ")
     .trim();
 }

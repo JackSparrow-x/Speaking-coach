@@ -6,10 +6,19 @@
 // 关键：Azure 把发音评估作为 STT 的扩展功能，靠一个特殊 header 启用
 // ========================================
 
-import { savePronunciationRecord } from "@/lib/db";
+import { savePronunciationRecord, checkAndIncrementQuota } from "@/lib/db";
 
 export async function POST(request: Request) {
   try {
+    // 防刷：每天最多 200 次
+    const allowed = await checkAndIncrementQuota("transcribe", 200);
+    if (!allowed) {
+      return Response.json(
+        { error: "今日录音次数已达上限，明天再来" },
+        { status: 429 },
+      );
+    }
+
     const formData = await request.formData();
     const audioFile = formData.get("audio") as File | null;
 

@@ -1,6 +1,7 @@
 // 整句语调分析 API — 全套切到 Claude
 
 import { ask } from "@/lib/llm";
+import { checkAndIncrementQuota } from "@/lib/db";
 
 type WordProsodyInput = {
   word: string;
@@ -12,6 +13,15 @@ type WordProsodyInput = {
 
 export async function POST(request: Request) {
   try {
+    // 防刷：和 analyze-word 共用配额，每天 300 次
+    const allowed = await checkAndIncrementQuota("analysis", 300);
+    if (!allowed) {
+      return Response.json(
+        { error: "今日分析次数已达上限，明天再来" },
+        { status: 429 },
+      );
+    }
+
     const { sentence, prosodyScore, fluencyScore, words } =
       (await request.json()) as {
         sentence: string;

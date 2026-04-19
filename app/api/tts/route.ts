@@ -5,8 +5,19 @@
 // 返回：audio/mpeg 二进制流
 // ========================================
 
+import { checkAndIncrementQuota } from "@/lib/db";
+
 export async function POST(request: Request) {
   try {
+    // 防刷：每天最多 500 次
+    const allowed = await checkAndIncrementQuota("tts", 500);
+    if (!allowed) {
+      return Response.json(
+        { error: "今日语音合成次数已达上限，明天再来" },
+        { status: 429 },
+      );
+    }
+
     const { text } = await request.json();
 
     if (!text || typeof text !== "string") {

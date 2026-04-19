@@ -2,10 +2,19 @@
 
 import { chat } from "@/lib/llm";
 import { getScenario } from "@/lib/scenarios";
-import { saveMessage } from "@/lib/db";
+import { saveMessage, checkAndIncrementQuota } from "@/lib/db";
 
 export async function POST(request: Request) {
   try {
+    // 防刷：每天最多 500 次
+    const allowed = await checkAndIncrementQuota("chat", 500);
+    if (!allowed) {
+      return Response.json(
+        { error: "今日对话次数已达上限，明天再来" },
+        { status: 429 },
+      );
+    }
+
     const { messages, scenarioId, sessionId } = await request.json();
     const scenario = getScenario(scenarioId || "free");
 

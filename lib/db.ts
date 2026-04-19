@@ -83,8 +83,42 @@ async function initTables(db: Client) {
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (session_id) REFERENCES conversation_sessions(id)
     )`,
+    // 每日调用计数（防刷）
+    `CREATE TABLE IF NOT EXISTS usage_counter (
+      date TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      count INTEGER DEFAULT 0,
+      PRIMARY KEY (date, endpoint)
+    )`,
   ]);
   console.log("[db] 表初始化完成");
+}
+
+// ========================================
+// 配额检查（防 API 被刷爆）
+// 本地开发不限（返回 true）
+// 线上：每天每个 endpoint 各自的上限
+// ========================================
+export async function checkAndIncrementQuota(
+  endpoint: string,
+  dailyLimit: number,
+): Promise<boolean> {
+  const db = getDb();
+  if (!db) return true; // 本地不限
+
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+  // 原子 upsert：插入或累加，返回最新 count
+  const result = await db.execute({
+    sql: `INSERT INTO usage_counter (date, endpoint, count)
+          VALUES (?, ?, 1)
+          ON CONFLICT(date, endpoint) DO UPDATE SET count = count + 1
+          RETURNING count`,
+    args: [today, endpoint],
+  });
+
+  const count = Number(result.rows[0].count);
+  return count <= dailyLimit;
 }
 
 // ========================================

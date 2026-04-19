@@ -90,6 +90,40 @@ async function initTables(db: Client) {
       count INTEGER DEFAULT 0,
       PRIMARY KEY (date, endpoint)
     )`,
+    // Polish 记录：每次 LLM 分析用户一句话的结果
+    `CREATE TABLE IF NOT EXISTS polish_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER,
+      original_text TEXT NOT NULL,
+      color TEXT NOT NULL,
+      fix TEXT,
+      natural TEXT,
+      advanced TEXT,
+      praise TEXT,
+      variant TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (session_id) REFERENCES conversation_sessions(id)
+    )`,
+    // 收藏夹：用户手动星标的表达（可以是 natural / advanced / variant / 原句）
+    `CREATE TABLE IF NOT EXISTS favorite_expressions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      polish_record_id INTEGER,
+      text TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(polish_record_id, text, source_type),
+      FOREIGN KEY (polish_record_id) REFERENCES polish_records(id)
+    )`,
+    // Token 使用统计（按 日期+endpoint+模型 聚合，每天最多几行）
+    `CREATE TABLE IF NOT EXISTS token_usage (
+      date TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      model TEXT NOT NULL,
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0,
+      call_count INTEGER DEFAULT 0,
+      PRIMARY KEY (date, endpoint, model)
+    )`,
   ]);
   console.log("[db] 表初始化完成");
 }
@@ -282,6 +316,252 @@ export async function saveSummary(
           WHERE id = ?`,
     args: [summary, sessionId],
   });
+}
+
+// ========================================
+// Polish & 收藏夹相关
+// ========================================
+
+export type PolishColor = "red" | "blue" | "gold";
+
+/** 保存 polish 分析记录，返回自增 ID（本地 dev 返回 null）*/
+export async function savePolishRecord(params: {
+  sessionId: number | null;
+  originalText: string;
+  color: PolishColor;
+  fix: string | null;
+  natural: string | null;
+  advanced: string | null;
+  praise: string | null;
+  variant: string | null;
+}): Promise<number | null> {
+  const db = getDb();
+  if (!db) return null;
+
+  const result = await db.execute({
+    sql: `INSERT INTO polish_records
+          (session_id, original_text, color, fix, natural, advanced, praise, variant)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      params.sessionId,
+      params.originalText,
+      params.color,
+      params.fix,
+      params.natural,
+      params.advanced,
+      params.praise,
+      params.variant,
+    ],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+/**
+ * 切换收藏状态：已收藏则删除，未收藏则新增
+ * 返回最新状态 { favorited: true | false }
+ */
+export async function toggleFavorite(params: {
+  polishRecordId: number;
+  text: string;
+  sourceType: "natural" | "advanced" | "variant" | "original";
+}): Promise<{ favorited: boolean }> {
+  const db = getDb();
+  if (!db) {
+    // 本地 dev：不持久化，但返回 true 让前端 UI 切换生效
+    return { favorited: true };
+  }
+
+  // 先查是否已收藏
+  const existing = await db.execute({
+    sql: `SELECT id FROM favorite_expressions
+          WHERE polish_record_id = ? AND text = ? AND source_type = ?`,
+    args: [params.polishRecordId, params.text, params.sourceType],
+  });
+
+  if (existing.rows.length > 0) {
+    // 已收藏 → 删除
+    await db.execute({
+      sql: "DELETE FROM favorite_expressions WHERE id = ?",
+      args: [Number(existing.rows[0].id)],
+    });
+    return { favorited: false };
+  } else {
+    // 未收藏 → 新增
+    await db.execute({
+      sql: `INSERT INTO favorite_expressions (polish_record_id, text, source_type)
+            VALUES (?, ?, ?)`,
+      args: [params.polishRecordId, params.text, params.sourceType],
+    });
+    return { favorited: true };
+  }
+}
+
+/** 列出所有收藏（给收藏夹页面用，Step 6）*/
+export async function listFavorites(): Promise<
+  {
+    id: number;
+    polishRecordId: number;
+    text: string;
+    sourceType: string;
+    createdAt: string;
+    originalText: string | null;
+    color: string | null;
+  }[]
+> {
+  const db = getDb();
+  if (!db) return [];
+
+  const result = await db.execute(
+    `SELECT
+       f.id, f.polish_record_id, f.text, f.source_type, f.created_at,
+       p.original_text, p.color
+     FROM favorite_expressions f
+     LEFT JOIN polish_records p ON p.id = f.polish_record_id
+     ORDER BY f.created_at DESC`,
+  );
+
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    polishRecordId: Number(row.polish_record_id),
+    text: row.text as string,
+    sourceType: row.source_type as string,
+    createdAt: row.created_at as string,
+    originalText: (row.original_text as string) ?? null,
+    color: (row.color as string) ?? null,
+  }));
+}
+
+// ========================================
+// Token 用量追踪（按日期 × endpoint × 模型聚合）
+// ========================================
+
+/** 累加一次 LLM 调用的 token 用量（upsert）*/
+export async function recordTokenUsage(params: {
+  endpoint: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  await db.execute({
+    sql: `INSERT INTO token_usage (date, endpoint, model, input_tokens, output_tokens, call_count)
+          VALUES (?, ?, ?, ?, ?, 1)
+          ON CONFLICT(date, endpoint, model) DO UPDATE SET
+            input_tokens = input_tokens + ?,
+            output_tokens = output_tokens + ?,
+            call_count = call_count + 1`,
+    args: [
+      today,
+      params.endpoint,
+      params.model,
+      params.inputTokens,
+      params.outputTokens,
+      params.inputTokens,
+      params.outputTokens,
+    ],
+  });
+}
+
+/** 读取 token 用量统计（给 /api/stats 用）*/
+export async function getTokenStats(): Promise<{
+  today: {
+    input: number;
+    output: number;
+    total: number;
+    calls: number;
+  };
+  allTime: {
+    input: number;
+    output: number;
+    total: number;
+    calls: number;
+  };
+  byDay: {
+    date: string;
+    input: number;
+    output: number;
+    calls: number;
+  }[];
+  byEndpoint: {
+    endpoint: string;
+    model: string;
+    input: number;
+    output: number;
+    calls: number;
+  }[];
+}> {
+  const db = getDb();
+  if (!db) {
+    const empty = { input: 0, output: 0, total: 0, calls: 0 };
+    return { today: empty, allTime: empty, byDay: [], byEndpoint: [] };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const [todayRow, totalRow, byDay, byEndpoint] = await Promise.all([
+    db.execute({
+      sql: `SELECT
+              COALESCE(SUM(input_tokens),0) as input,
+              COALESCE(SUM(output_tokens),0) as output,
+              COALESCE(SUM(call_count),0) as calls
+            FROM token_usage WHERE date = ?`,
+      args: [today],
+    }),
+    db.execute(`SELECT
+                  COALESCE(SUM(input_tokens),0) as input,
+                  COALESCE(SUM(output_tokens),0) as output,
+                  COALESCE(SUM(call_count),0) as calls
+                FROM token_usage`),
+    db.execute(`SELECT
+                  date,
+                  SUM(input_tokens) as input,
+                  SUM(output_tokens) as output,
+                  SUM(call_count) as calls
+                FROM token_usage
+                GROUP BY date
+                ORDER BY date DESC
+                LIMIT 30`),
+    db.execute(`SELECT
+                  endpoint, model,
+                  SUM(input_tokens) as input,
+                  SUM(output_tokens) as output,
+                  SUM(call_count) as calls
+                FROM token_usage
+                GROUP BY endpoint, model
+                ORDER BY (SUM(input_tokens) + SUM(output_tokens)) DESC`),
+  ]);
+
+  const todayData = {
+    input: Number(todayRow.rows[0].input),
+    output: Number(todayRow.rows[0].output),
+    calls: Number(todayRow.rows[0].calls),
+  };
+  const totalData = {
+    input: Number(totalRow.rows[0].input),
+    output: Number(totalRow.rows[0].output),
+    calls: Number(totalRow.rows[0].calls),
+  };
+
+  return {
+    today: { ...todayData, total: todayData.input + todayData.output },
+    allTime: { ...totalData, total: totalData.input + totalData.output },
+    byDay: byDay.rows.map((r) => ({
+      date: r.date as string,
+      input: Number(r.input),
+      output: Number(r.output),
+      calls: Number(r.calls),
+    })),
+    byEndpoint: byEndpoint.rows.map((r) => ({
+      endpoint: r.endpoint as string,
+      model: r.model as string,
+      input: Number(r.input),
+      output: Number(r.output),
+      calls: Number(r.calls),
+    })),
+  };
 }
 
 /** 获取最近的未总结会话（下次打开时用） */

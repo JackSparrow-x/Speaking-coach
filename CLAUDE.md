@@ -89,6 +89,37 @@ web/
 3. **环境变量在 Vercel dashboard 改**，本地 `.env.local` 只给本地用。两边独立不冲突。
 4. **Vercel 的 Root Directory 设为 `web`**（项目在子目录）。
 
+## 测试工作流（避免污染线上数据库）
+
+**核心原则：线上是女朋友的真实数据，本地是测试沙盒，两者不互通**。
+
+### 默认：本地测试不写库
+- `npm run dev` 时 `NODE_ENV=development`
+- `lib/db.ts` 的 `getDb()` 返回 null → 所有写入函数静默 no-op
+- 所以**本地随便折腾**，UI、LLM、发音评估都正常跑，就是不持久化
+
+### 需要测持久化功能时（比如收藏夹、对话历史）
+有三种方式，推荐度从高到低：
+
+**方案 A — Turso 分支数据库（最干净）**：
+- Turso 支持免费 branching：从主库派生一个 `dev-branch`
+- 临时给 `.env.local` 加 `TURSO_DB_URL` / `TURSO_DB_TOKEN` 指向这个 branch
+- 测完数据随便玩，不影响主库
+- 具体参考 Turso 文档 `turso db shell <main> branch create dev`
+
+**方案 B — 直接连线上 DB，事后清理**：
+- `.env.local` 加上真实 `TURSO_DB_URL` / `TURSO_DB_TOKEN`
+- 测试时会写到女朋友数据库
+- 测完用 SQL 按时间戳清理：`DELETE FROM polish_records WHERE created_at > '2026-04-20 14:00:00'`
+- **高风险**，只在需要全链路测试时用
+
+**方案 C — 只测 UI 和 LLM，跳过持久化**：
+- 默认本地就是这样
+- 如果测试不需要 DB 持久化，什么都不用加
+
+### 推上云前的检查
+推 Vercel 前本地跑过测试 = 生产代码都是验证过的。不要在线上"随便试试"。
+
 ## 常用命令
 
 ```bash

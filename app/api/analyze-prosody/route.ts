@@ -83,6 +83,7 @@ ${wordReport}
     const analysis = await ask(
       "你是一个为中文母语者设计的英语语调教练。",
       prompt,
+      "analyze-prosody",
     );
 
     return Response.json({ analysis });

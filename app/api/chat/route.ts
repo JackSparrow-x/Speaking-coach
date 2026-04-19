@@ -26,13 +26,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // 调 Claude
+    // 调 Claude（带 endpoint 名做 token 统计）
     const reply = await chat(
       scenario.systemPrompt,
       messages.map((m: { role: string; content: string }) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       })),
+      512,
+      "chat",
     );
 
     // 保存 AI 回复（fire-and-forget）

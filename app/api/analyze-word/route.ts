@@ -73,6 +73,7 @@ ${weakPhonemes ? `重点薄弱音素：${weakPhonemes}` : ""}
     const analysis = await ask(
       "你是一个为中文母语者设计的英语发音教练。",
       prompt,
+      "analyze-word",
     );
 
     return Response.json({ analysis });
